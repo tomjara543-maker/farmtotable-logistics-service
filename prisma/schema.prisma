@@ -1,0 +1,81 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
+model Delivery {
+  id                String                  @id @default(uuid())
+  orderId           String                  @unique @map("order_id")
+  buyerId           String                  @map("buyer_id")
+  zone              String
+  address           String
+  totalKg           Float                   @map("total_kg")
+  status            DeliveryStatus          @default(PENDING)
+  requiresColdChain Boolean                 @default(false) @map("requires_cold_chain")
+  routeId           String?                 @map("route_id")
+  route             Route?                  @relation(fields: [routeId], references: [id])
+  sequence          Int?
+  coldChainBreach   Boolean                 @default(false) @map("cold_chain_breach")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  history           DeliveryStatusHistory[]
+  temperatureLog    TemperatureReading[]
+
+  @@index([buyerId])
+  @@index([zone, status])
+  @@map("deliveries")
+}
+
+model DeliveryStatusHistory {
+  id         String         @id @default(uuid())
+  deliveryId String         @map("delivery_id")
+  delivery   Delivery       @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  status     DeliveryStatus
+  at         DateTime       @default(now())
+
+  @@index([deliveryId])
+  @@map("delivery_status_history")
+}
+
+model TemperatureReading {
+  id         String   @id @default(uuid())
+  deliveryId String   @map("delivery_id")
+  delivery   Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  celsius    Float
+  at         DateTime @default(now())
+
+  @@index([deliveryId])
+  @@map("temperature_readings")
+}
+
+model Route {
+  id                String     @id @default(uuid())
+  zone              String
+  totalKg           Float      @map("total_kg")
+  requiresColdChain Boolean    @default(false) @map("requires_cold_chain")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  deliveries        Delivery[]
+
+  @@map("routes")
+}
+
+model ProcessedEvent {
+  eventId     String   @id @map("event_id")
+  eventType   String   @map("event_type")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("processed_events")
+}
