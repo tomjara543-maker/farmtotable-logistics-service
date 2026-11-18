@@ -4,6 +4,7 @@ import { requireUser, userOf } from "./auth";
 import { canTransition, COLD_CHAIN_RANGE, include, isColdChainBreach, setStatus, toJson } from "./deliveries";
 import { prisma } from "./db";
 import { publish } from "./events";
+import { approximateByZone, depot, nearestNeighborOrder, routeDistanceKm } from "./geo";
 import { DeliveryStatus } from "./generated/prisma/client";
 import { HttpError, notFound, round2 } from "./http";
 
@@ -41,11 +42,19 @@ export function logisticsRoutes() {
 
   router.get("/routes", requireUser("ADMIN"), async (_req, res) => {
     const routes = await prisma.route.findMany({
-      include: { deliveries: { select: { id: true, sequence: true }, orderBy: { sequence: "asc" } } },
+      include: { deliveries: { select: { id: true, sequence: true, address: true, lat: true, lng: true, requiresColdChain: true }, orderBy: { sequence: "asc" } } },
       orderBy: { createdAt: "desc" },
     });
     res.json(
-      routes.map(({ deliveries, ...r }) => ({ ...r, deliveryIds: deliveries.map((d) => d.id) })),
+      routes.map(({ deliveries, ...r }) => ({
+        ...r,
+        distanceKm: r.distanceKm ?? undefined,
+        deliveryIds: deliveries.map((d) => d.id),
+        depot: depot(),
+        stops: deliveries
+          .filter((d) => d.lat != null && d.lng != null)
+          .map((d) => ({ id: d.id, sequence: d.sequence, address: d.address, lat: d.lat, lng: d.lng, coldChain: d.requiresColdChain })),
+      })),
     );
   });
 
@@ -53,23 +62,44 @@ export function logisticsRoutes() {
     const { zone } = zoneSchema.parse(req.body);
     const pending = await prisma.delivery.findMany({ where: { zone, status: "PENDING" }, orderBy: { createdAt: "asc" } });
     if (pending.length === 0) throw new HttpError(422, `No hay entregas pendientes en la zona ${zone}`);
-    pending.sort((a, b) => Number(b.requiresColdChain) - Number(a.requiresColdChain));
+    const origin = depot();
+    const located = pending.map((d) => {
+      if (d.lat != null && d.lng != null) return { d, lat: d.lat, lng: d.lng, approximated: false };
+      const p = approximateByZone(zone, d.address);
+      return { d, lat: p.lat, lng: p.lng, approximated: true };
+    });
+    const cold = nearestNeighborOrder(origin, located.filter((s) => s.d.requiresColdChain));
+    const rest = nearestNeighborOrder(cold.at(-1) ?? origin, located.filter((s) => !s.d.requiresColdChain));
+    const ordered = [...cold, ...rest];
+    const distanceKm = routeDistanceKm(origin, ordered);
 
     const route = await prisma.$transaction(async (tx) => {
       const r = await tx.route.create({
-        data: { zone, totalKg: round2(pending.reduce((s, d) => s + d.totalKg, 0)), requiresColdChain: pending.some((d) => d.requiresColdChain) },
+        data: { zone, distanceKm, totalKg: round2(pending.reduce((s, d) => s + d.totalKg, 0)), requiresColdChain: pending.some((d) => d.requiresColdChain) },
       });
-      for (const [i, d] of pending.entries()) {
+      for (const [i, s] of ordered.entries()) {
         await tx.delivery.update({
-          where: { id: d.id },
-          data: { status: "ASSIGNED", routeId: r.id, sequence: i + 1, history: { create: { status: "ASSIGNED" } } },
+          where: { id: s.d.id },
+          data: {
+            status: "ASSIGNED",
+            routeId: r.id,
+            sequence: i + 1,
+            ...(s.approximated ? { lat: s.lat, lng: s.lng, geoSource: "zone" } : {}),
+            history: { create: { status: "ASSIGNED" } },
+          },
         });
       }
       return r;
     });
-    const deliveryIds = pending.map((d) => d.id);
+    const deliveryIds = ordered.map((s) => s.d.id);
     publish("route.planned", { routeId: route.id, zone, deliveries: deliveryIds.length, deliveryIds });
-    res.status(201).json({ ...route, deliveryIds });
+    res.status(201).json({
+      ...route,
+      distanceKm,
+      deliveryIds,
+      depot: origin,
+      stops: ordered.map((s, i) => ({ id: s.d.id, sequence: i + 1, address: s.d.address, lat: s.lat, lng: s.lng, coldChain: s.d.requiresColdChain })),
+    });
   });
 
   router.patch("/:id/status", requireUser("ADMIN"), async (req, res) => {

@@ -1,5 +1,6 @@
 import { setStatus } from "./deliveries";
 import { idempotent, prisma } from "./db";
+import { locate } from "./geo";
 import { publish, subscribe } from "./events";
 
 export async function registerConsumers() {
@@ -20,6 +21,9 @@ export async function registerConsumers() {
             history: { create: { status: "PENDING" } },
           },
         });
+        void locate(d.address, d.zone)
+          .then((p) => prisma.delivery.update({ where: { id: d.id }, data: { lat: p.lat, lng: p.lng, geoSource: p.source } }))
+          .catch(() => undefined);
         publish("delivery.created", { deliveryId: d.id, orderId: d.orderId, buyerId: d.buyerId, zone: d.zone });
       }
 

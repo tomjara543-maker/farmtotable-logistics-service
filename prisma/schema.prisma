@@ -29,6 +29,9 @@ model Delivery {
   routeId           String?                 @map("route_id")
   route             Route?                  @relation(fields: [routeId], references: [id])
   sequence          Int?
+  lat               Float?
+  lng               Float?
+  geoSource         String?                 @map("geo_source")
   coldChainBreach   Boolean                 @default(false) @map("cold_chain_breach")
   createdAt         DateTime                @default(now()) @map("created_at")
   history           DeliveryStatusHistory[]
@@ -66,6 +69,7 @@ model Route {
   zone              String
   totalKg           Float      @map("total_kg")
   requiresColdChain Boolean    @default(false) @map("requires_cold_chain")
+  distanceKm        Float?     @map("distance_km")
   createdAt         DateTime   @default(now()) @map("created_at")
   deliveries        Delivery[]
 
