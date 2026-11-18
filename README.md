@@ -29,7 +29,7 @@ Errores: `{ "error": "mensaje" }` con 400 (validación zod), 401, 403, 404, 409 
 - Al crear una entrega (`payment.authorized`) la dirección se convierte en coordenadas con **Nominatim (OpenStreetMap)**, sin llave, respetando 1 petición por segundo y enviando un `User-Agent`. Si el servicio falla, se usa una aproximación por zona (`geoSource: "zone"`).
 - `POST /deliveries/routes` ordena las paradas por **vecino más cercano** desde el centro de acopio (cadena de frío primero), calcula la distancia con la fórmula de Haversine y la guarda en `distanceKm`. La respuesta incluye `depot` y `stops[{ sequence, address, lat, lng, coldChain }]`.
 - El frontend dibuja el mapa con Leaflet y teselas de OpenStreetMap.
-- Variables: `DEPOT_NAME`, `DEPOT_LAT`, `DEPOT_LNG` (centro de acopio) y `GEOCODING_ENABLED` (`false` desactiva Nominatim).
+- Por defecto todo está centrado en **Montería, Córdoba**: el centro de acopio en 8.7479, -75.8814 y las direcciones se buscan como "dirección, Montería, Córdoba, Colombia"; un resultado a más de 60 km del centro de acopio se descarta. Variables: `DEPOT_NAME`, `DEPOT_LAT`, `DEPOT_LNG` (centro de acopio), `GEOCODING_CITY`, `GEOCODING_MAX_KM` y `GEOCODING_ENABLED` (`false` desactiva Nominatim).
 
 ## Eventos
 

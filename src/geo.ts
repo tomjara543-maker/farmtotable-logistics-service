@@ -18,9 +18,9 @@ export function haversineKm(a: Point, b: Point) {
 }
 
 export const depot = () => ({
-  name: process.env.DEPOT_NAME ?? "Centro de acopio",
-  lat: Number(process.env.DEPOT_LAT ?? 4.711),
-  lng: Number(process.env.DEPOT_LNG ?? -74.0721),
+  name: process.env.DEPOT_NAME ?? "Centro de acopio Montería",
+  lat: Number(process.env.DEPOT_LAT ?? 8.7479),
+  lng: Number(process.env.DEPOT_LNG ?? -75.8814),
 });
 
 export function nearestNeighborOrder<T extends Point>(origin: Point, stops: T[]): T[] {
@@ -56,10 +56,10 @@ export function routeDistanceKm(origin: Point, ordered: Point[]) {
 
 const ZONE_OFFSETS: Record<string, Point> = {
   centro: { lat: 0, lng: 0 },
-  norte: { lat: 0.05, lng: 0 },
-  sur: { lat: -0.05, lng: 0 },
-  occidente: { lat: 0, lng: -0.06 },
-  oriente: { lat: 0, lng: 0.06 },
+  norte: { lat: 0.03, lng: 0 },
+  sur: { lat: -0.03, lng: 0 },
+  occidente: { lat: 0, lng: -0.035 },
+  oriente: { lat: 0, lng: 0.035 },
 };
 
 function hash(text: string) {
@@ -72,8 +72,8 @@ export function approximateByZone(zone: string, address: string): Located {
   const base = depot();
   const offset = ZONE_OFFSETS[zone.trim().toLowerCase()] ?? { lat: 0, lng: 0 };
   const h = hash(address);
-  const jitterLat = ((h % 1000) / 1000 - 0.5) * 0.03;
-  const jitterLng = (((h >>> 10) % 1000) / 1000 - 0.5) * 0.03;
+  const jitterLat = ((h % 1000) / 1000 - 0.5) * 0.012;
+  const jitterLng = (((h >>> 10) % 1000) / 1000 - 0.5) * 0.012;
   return { lat: base.lat + offset.lat + jitterLat, lng: base.lng + offset.lng + jitterLng, source: "zone" };
 }
 
@@ -89,7 +89,7 @@ export function geocode(address: string, zone: string): Promise<Located | null> 
       url.searchParams.set("format", "jsonv2");
       url.searchParams.set("limit", "1");
       url.searchParams.set("countrycodes", "co");
-      url.searchParams.set("q", `${address}, ${zone}, Colombia`);
+      url.searchParams.set("q", `${address}, ${process.env.GEOCODING_CITY ?? "Montería, Córdoba"}, Colombia`);
       const res = await fetch(url, {
         headers: { "User-Agent": "FarmToTable-logistics/1.0 (proyecto academico)", Accept: "application/json" },
         signal: AbortSignal.timeout(5000),
@@ -100,7 +100,10 @@ export function geocode(address: string, zone: string): Promise<Located | null> 
       if (!first) return null;
       const lat = Number(first.lat);
       const lng = Number(first.lon);
-      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng, source: "nominatim" } : null;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      const maxKm = Number(process.env.GEOCODING_MAX_KM ?? 60);
+      if (haversineKm({ lat, lng }, depot()) > maxKm) return null;
+      return { lat, lng, source: "nominatim" };
     } catch {
       return null;
     }

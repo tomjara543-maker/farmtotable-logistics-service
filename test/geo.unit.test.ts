@@ -28,18 +28,21 @@ test("geocode usa Nominatim con un fetch simulado y locate recurre a la zona cua
   let requested = "";
   globalThis.fetch = (async (input: URL | RequestInfo) => {
     requested = String(input);
-    return new Response(JSON.stringify([{ lat: "4.65", lon: "-74.05" }]), { status: 200 });
+    return new Response(JSON.stringify([{ lat: "8.76", lon: "-75.89" }]), { status: 200 });
   }) as typeof fetch;
 
   const found = await geocode("Calle 10 # 5-20", "Norte");
-  assert.deepEqual(found, { lat: 4.65, lng: -74.05, source: "nominatim" });
-  assert.equal(new URL(requested).searchParams.get("q"), "Calle 10 # 5-20, Norte, Colombia");
+  assert.deepEqual(found, { lat: 8.76, lng: -75.89, source: "nominatim" });
+  assert.equal(new URL(requested).searchParams.get("q"), "Calle 10 # 5-20, Montería, Córdoba, Colombia");
 
   globalThis.fetch = (async () => new Response("error", { status: 503 })) as typeof fetch;
   const fallback = await locate("Calle 10 # 5-20", "Norte");
   assert.equal(fallback.source, "zone");
   assert.ok(fallback.lat > depot().lat);
   assert.deepEqual(approximateByZone("Norte", "Calle 10 # 5-20"), fallback);
+
+  globalThis.fetch = (async () => new Response(JSON.stringify([{ lat: "4.65", lon: "-74.05" }]), { status: 200 })) as typeof fetch;
+  assert.equal(await geocode("Calle 10 # 5-20", "Norte"), null);
 
   process.env.GEOCODING_ENABLED = "false";
   assert.equal(await geocode("cualquiera", "Sur"), null);

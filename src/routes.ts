@@ -4,7 +4,7 @@ import { requireUser, userOf } from "./auth";
 import { canTransition, COLD_CHAIN_RANGE, include, isColdChainBreach, setStatus, toJson } from "./deliveries";
 import { prisma } from "./db";
 import { publish } from "./events";
-import { approximateByZone, depot, nearestNeighborOrder, routeDistanceKm } from "./geo";
+import { approximateByZone, depot, haversineKm, locate, nearestNeighborOrder, routeDistanceKm } from "./geo";
 import { DeliveryStatus } from "./generated/prisma/client";
 import { HttpError, notFound, round2 } from "./http";
 
@@ -63,11 +63,21 @@ export function logisticsRoutes() {
     const pending = await prisma.delivery.findMany({ where: { zone, status: "PENDING" }, orderBy: { createdAt: "asc" } });
     if (pending.length === 0) throw new HttpError(422, `No hay entregas pendientes en la zona ${zone}`);
     const origin = depot();
-    const located = pending.map((d) => {
-      if (d.lat != null && d.lng != null) return { d, lat: d.lat, lng: d.lng, approximated: false };
-      const p = approximateByZone(zone, d.address);
-      return { d, lat: p.lat, lng: p.lng, approximated: true };
-    });
+    let lookups = 0;
+    const located = [];
+    for (const d of pending) {
+      const precise =
+        d.lat != null &&
+        d.lng != null &&
+        d.geoSource === "nominatim" &&
+        haversineKm({ lat: d.lat, lng: d.lng }, origin) <= Number(process.env.GEOCODING_MAX_KM ?? 60);
+      if (precise) {
+        located.push({ d, lat: d.lat!, lng: d.lng!, changed: false });
+        continue;
+      }
+      const p = lookups++ < 10 ? await locate(d.address, zone) : approximateByZone(zone, d.address);
+      located.push({ d, lat: p.lat, lng: p.lng, changed: true, source: p.source });
+    }
     const cold = nearestNeighborOrder(origin, located.filter((s) => s.d.requiresColdChain));
     const rest = nearestNeighborOrder(cold.at(-1) ?? origin, located.filter((s) => !s.d.requiresColdChain));
     const ordered = [...cold, ...rest];
@@ -84,7 +94,7 @@ export function logisticsRoutes() {
             status: "ASSIGNED",
             routeId: r.id,
             sequence: i + 1,
-            ...(s.approximated ? { lat: s.lat, lng: s.lng, geoSource: "zone" } : {}),
+            ...(s.changed ? { lat: s.lat, lng: s.lng, geoSource: s.source } : {}),
             history: { create: { status: "ASSIGNED" } },
           },
         });
