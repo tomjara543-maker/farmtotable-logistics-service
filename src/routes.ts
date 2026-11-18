@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireUser, userOf } from "./auth";
-import { COLD_CHAIN_RANGE, include, setStatus, toJson } from "./deliveries";
+import { canTransition, COLD_CHAIN_RANGE, include, isColdChainBreach, setStatus, toJson } from "./deliveries";
 import { prisma } from "./db";
 import { publish } from "./events";
 import { DeliveryStatus } from "./generated/prisma/client";
@@ -9,11 +9,6 @@ import { HttpError, notFound, round2 } from "./http";
 
 const STATUSES = Object.values(DeliveryStatus) as string[];
 
-const transitions: Partial<Record<DeliveryStatus, DeliveryStatus[]>> = {
-  ASSIGNED: ["IN_TRANSIT"],
-  IN_TRANSIT: ["DELIVERED", "FAILED"],
-  FAILED: ["IN_TRANSIT"],
-};
 const statusEvents: Partial<Record<DeliveryStatus, string>> = {
   IN_TRANSIT: "delivery.in_transit",
   DELIVERED: "delivery.completed",
@@ -80,7 +75,7 @@ export function logisticsRoutes() {
   router.patch("/:id/status", requireUser("ADMIN"), async (req, res) => {
     const d = await findDelivery(String(req.params.id));
     const { status } = statusSchema.parse(req.body);
-    if (!transitions[d.status]?.includes(status)) throw new HttpError(409, `No se puede pasar de ${d.status} a ${status}`);
+    if (!canTransition(d.status, status)) throw new HttpError(409, `No se puede pasar de ${d.status} a ${status}`);
     const updated = await setStatus(d.id, status);
     const event = statusEvents[status];
     if (event) publish(event, { deliveryId: d.id, orderId: d.orderId, buyerId: d.buyerId });
@@ -91,7 +86,7 @@ export function logisticsRoutes() {
     const d = await findDelivery(String(req.params.id));
     const { celsius } = temperatureSchema.parse(req.body);
     if (!d.requiresColdChain) throw new HttpError(422, "Esta entrega no requiere cadena de frío");
-    const breach = celsius < COLD_CHAIN_RANGE.min || celsius > COLD_CHAIN_RANGE.max;
+    const breach = isColdChainBreach(celsius);
     const updated = await prisma.delivery.update({
       where: { id: d.id },
       data: { temperatureLog: { create: { celsius } }, ...(breach ? { coldChainBreach: true } : {}) },

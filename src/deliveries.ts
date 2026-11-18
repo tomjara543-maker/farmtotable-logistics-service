@@ -8,6 +8,16 @@ export const include = {
 
 export const COLD_CHAIN_RANGE = { min: 0, max: 8 };
 
+const TRANSITIONS: Partial<Record<DeliveryStatus, DeliveryStatus[]>> = {
+  ASSIGNED: ["IN_TRANSIT"],
+  IN_TRANSIT: ["DELIVERED", "FAILED"],
+  FAILED: ["IN_TRANSIT"],
+};
+
+export const canTransition = (from: DeliveryStatus, to: DeliveryStatus) => TRANSITIONS[from]?.includes(to) ?? false;
+
+export const isColdChainBreach = (celsius: number) => celsius < COLD_CHAIN_RANGE.min || celsius > COLD_CHAIN_RANGE.max;
+
 export const toJson = (d: Delivery & { history: DeliveryStatusHistory[]; temperatureLog: TemperatureReading[] }) => ({
   id: d.id,
   orderId: d.orderId,
